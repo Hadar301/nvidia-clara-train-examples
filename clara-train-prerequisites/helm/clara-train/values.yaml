@@ -1,0 +1,90 @@
+# Default values for clara-train prerequisites
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# NGC API Key for accessing NVIDIA Container Registry
+# Override with: --set ngcApiKey=<your-key>
+ngcApiKey: ""
+
+# Target namespace for deployment
+# Override with: --set namespace=<your-namespace>
+namespace: ""
+
+# Component toggles - enable/disable individual components
+components:
+  # NGC Registry Secret
+  secret:
+    enabled: true
+    name: ngc-secret
+    email: "user@example.com"  # Optional, can be any email
+
+  # Persistent Volume Claim for datasets/models
+  storage:
+    enabled: true
+    name: clara-train-storage
+    size: 100Gi
+    storageClassName: gp3-csi
+    accessMode: ReadWriteOnce
+
+  # Triton Inference Server for AIAA (AI-Assisted Annotation)
+  # Note: Requires model repository configuration. Disabled by default.
+  triton:
+    enabled: false
+    name: triton-server
+    image: nvcr.io/nvidia/tritonserver:24.01-py3
+    replicas: 1
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+      requests:
+        memory: "8Gi"
+        cpu: "4"
+    # Tolerations for GPU nodes (customize for your cluster)
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "g6e-gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    ports:
+      http: 8000
+      grpc: 8001
+      metrics: 8002
+    service:
+      type: ClusterIP
+      name: triton-server-service
+
+  # ImageStream for Clara Train SDK
+  imagestream:
+    enabled: true
+    name: clara-train-workbench
+    # Namespace for ImageStream deployment
+    # If empty, uses release namespace. Set to "redhat-ods-applications" for cluster-wide
+    namespace: ""
+    image:
+      registry: quay.io
+      repository: hacohen/clara-sdk
+      tag: v4.1
+    annotations:
+      # RHOAI notebook image annotations for UI display
+      notebook-image-url: "nvcr.io/nvidia/clara-train-sdk:v4.1"
+      notebook-image-name: "Clara Train SDK"
+      notebook-image-desc: "NVIDIA Clara Train SDK for medical imaging AI"
+      notebook-image-order: "100"
+    labels:
+      # Required label for RHOAI notebook image discovery
+      opendatahub.io/notebook-image: "true"
+    # Software and dependencies metadata for RHOAI UI
+    software:
+      - name: "Clara Train"
+        version: "v4.1"
+      - name: "PyTorch"
+        version: "latest"
+      - name: "MONAI"
+        version: "latest"
+    pythonDependencies:
+      - name: "clara-train-core"
+        version: "4.1"
+    # Schedule automatic image imports
+    scheduledImport: true

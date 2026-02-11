@@ -1,0 +1,27 @@
+{{- if .Values.components.triton.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.components.triton.service.name }}
+  namespace: {{ include "clara-train.namespace" . }}
+  labels:
+    {{- include "clara-train.labels" . | nindent 4 }}
+    app: {{ .Values.components.triton.name }}
+spec:
+  type: {{ .Values.components.triton.service.type }}
+  selector:
+    app: {{ .Values.components.triton.name }}
+  ports:
+  - name: http
+    port: {{ .Values.components.triton.ports.http }}
+    targetPort: http
+    protocol: TCP
+  - name: grpc
+    port: {{ .Values.components.triton.ports.grpc }}
+    targetPort: grpc
+    protocol: TCP
+  - name: metrics
+    port: {{ .Values.components.triton.ports.metrics }}
+    targetPort: metrics
+    protocol: TCP
+{{- end }}

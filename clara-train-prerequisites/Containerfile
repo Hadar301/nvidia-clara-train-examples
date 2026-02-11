@@ -1,0 +1,23 @@
+# Custom Clara Train SDK image for L40S GPU support
+# Bypasses GPU architecture check for newer GPUs (Ada Lovelace)
+
+FROM nvcr.io/nvidia/clara-train-sdk:v4.1
+
+# Fix CUDA compatibility issue with newer drivers (580.x)
+# The base image contains CUDA compat libs for driver 470.x which conflict with newer drivers
+# Remove outdated compat libraries to use host driver libraries instead
+RUN rm -f /etc/ld.so.conf.d/00-cuda-compat.conf && \
+    mv /usr/local/cuda/compat /usr/local/cuda/compat.disabled && \
+    ldconfig
+
+# Update LD_LIBRARY_PATH to prioritize host NVIDIA libraries
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+
+# Set environment variables for Jupyter to use writable directories
+ENV JUPYTER_RUNTIME_DIR=/tmp/jupyter_runtime \
+    JUPYTER_DATA_DIR=/tmp/jupyter_data \
+    JUPYTER_CONFIG_DIR=/tmp/jupyter_config
+
+# Override the entrypoint to skip GPU check and start Jupyter directly
+ENTRYPOINT []
+CMD ["/bin/bash", "-c", "exec jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password='' --NotebookApp.allow_origin='*' --NotebookApp.base_url=${NB_PREFIX} --NotebookApp.authenticate_prometheus=False"]

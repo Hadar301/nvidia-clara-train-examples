@@ -1,0 +1,42 @@
+{{- if .Values.components.imagestream.enabled }}
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: {{ .Values.components.imagestream.name }}
+  namespace: {{ include "clara-train.imagestream.namespace" . }}
+  labels:
+    {{- include "clara-train.labels" . | nindent 4 }}
+    {{- if .Values.components.imagestream.labels }}
+    {{- range $key, $value := .Values.components.imagestream.labels }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+    {{- end }}
+  annotations:
+    {{- if .Values.components.imagestream.annotations }}
+    opendatahub.io/notebook-image-url: {{ index .Values.components.imagestream.annotations "notebook-image-url" | quote }}
+    opendatahub.io/notebook-image-name: {{ index .Values.components.imagestream.annotations "notebook-image-name" | quote }}
+    opendatahub.io/notebook-image-desc: {{ index .Values.components.imagestream.annotations "notebook-image-desc" | quote }}
+    opendatahub.io/notebook-image-order: {{ index .Values.components.imagestream.annotations "notebook-image-order" | quote }}
+    {{- end }}
+spec:
+  lookupPolicy:
+    local: true
+  tags:
+  - name: {{ .Values.components.imagestream.image.tag | quote }}
+    annotations:
+      {{- if .Values.components.imagestream.software }}
+      opendatahub.io/notebook-software: {{ .Values.components.imagestream.software | toJson | quote }}
+      {{- end }}
+      {{- if .Values.components.imagestream.pythonDependencies }}
+      opendatahub.io/notebook-python-dependencies: {{ .Values.components.imagestream.pythonDependencies | toJson | quote }}
+      {{- end }}
+    from:
+      kind: DockerImage
+      name: {{ printf "%s/%s:%s" .Values.components.imagestream.image.registry .Values.components.imagestream.image.repository .Values.components.imagestream.image.tag }}
+    importPolicy:
+      {{- if .Values.components.imagestream.scheduledImport }}
+      scheduled: true
+      {{- end }}
+    referencePolicy:
+      type: Source
+{{- end }}
