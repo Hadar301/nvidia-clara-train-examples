@@ -7,10 +7,36 @@ This directory contains the installation tooling for NVIDIA Clara Train SDK prer
 This Helm chart and Makefile setup automates the deployment of:
 - **NGC Registry Secret**: Authentication for NVIDIA container registry
 - **Storage PVC**: Persistent volume for datasets and models (100GB)
-- **ImageStream**: Clara Train SDK v4.1 container image for RHOAI workbenches
+- **Custom Clara Train Image**: Modified Clara Train SDK v4.1 with L40S GPU compatibility fixes
+- **ImageStream**: Makes the custom image available for RHOAI workbenches
 
 **Optional Component (not installed by default):**
 - **Triton Inference Server**: For AI-Assisted Annotation (AIAA) functionality - requires model repository configuration
+
+### Why a Custom Image is Required
+
+The official `nvcr.io/nvidia/clara-train-sdk:v4.1` cannot run on modern GPUs like the L40S due to two critical incompatibilities. Our custom image ([Containerfile](Containerfile)) solves both issues.
+
+#### Problem 1: GPU Architecture Incompatibility
+- **Issue**: Clara Train SDK v4.1 (October 2021) has a GPU architecture whitelist that only recognizes Ampere GPUs
+- **L40S GPU**: Uses the newer Ada Lovelace architecture (2023)
+- **Error**: Container fails to start with `ERROR: No supported GPU(s) detected to run this container`
+- **Fix**: Custom image clears the `ENTRYPOINT` to bypass the GPU validation script
+
+#### Problem 2: CUDA Driver Compatibility
+- **Issue**: Base image contains CUDA compat libraries for driver 470.x, but modern clusters run driver 580.x+
+- **Symptom**: Container starts but `torch.cuda.is_available()` returns `False` even though `nvidia-smi` works
+- **Root Cause**: Outdated `/usr/local/cuda/compat/lib/libcuda.so.470.57.02` conflicts with host driver
+- **Fix**: Custom image removes incompatible compat libraries and prioritizes host driver libraries from GPU Operator
+
+#### What the Custom Image Does
+The [Containerfile](Containerfile) applies three critical fixes:
+
+1. **Bypasses GPU architecture check** - Removes the validation script that rejects L40S GPUs
+2. **Fixes CUDA driver compatibility** - Removes outdated CUDA compat libraries and configures the container to use host driver libraries (580.x+)
+3. **Configures Jupyter for RHOAI** - Sets proper base URL, writable directories, and authentication for OpenShift AI integration
+
+**Without this custom image**: The Clara Train SDK container would refuse to start on L40S GPUs, and even if forced to start, PyTorch would not be able to detect or use the GPU.
 
 ## Quick Start
 
@@ -61,12 +87,18 @@ Wait for the ImageStream to import (~10-15 minutes for the 15GB image).
 1. Navigate to RHOAI Dashboard
 2. Create or select a Data Science Project
 3. Create a new Workbench:
-   - **Image**: Clara Train SDK (v4.1)
+   - **Image**: Clara Train SDK (v4.1) - **MUST use the custom image from the ImageStream**
    - **GPU**: 1 nvidia.com/gpu
    - **CPU**: 16 cores
    - **Memory**: 64GB
    - **Storage**: 100GB
    - **Mount**: clara-train-storage PVC
+
+**CRITICAL**: You **must** use the Clara Train SDK image from the ImageStream created by this installation. Do **NOT** use the official `nvcr.io/nvidia/clara-train-sdk:v4.1` image directly, as it:
+- Will fail to start on L40S GPUs (architecture whitelist rejection)
+- Cannot detect GPUs in PyTorch even if it starts (driver compatibility issues)
+
+The ImageStream provides the custom image with all necessary fixes applied.
 
 ### 6. Test GPU Functionality
 
@@ -186,10 +218,18 @@ make install --set components.imagestream.namespace=redhat-ods-applications
 
 ### ImageStream
 - **Name**: `clara-train-workbench`
-- **Image**: `nvcr.io/nvidia/clara-train-sdk:v4.1`
-- **Size**: ~15GB
+- **Base Image**: `nvcr.io/nvidia/clara-train-sdk:v4.1` (modified via Containerfile)
+- **Custom Image**: `quay.io/hacohen/clara-sdk:v4.1` (default in values.yaml)
+- **Size**: ~16GB
 - **Import Time**: 10-15 minutes
-- **Purpose**: Notebook image for RHOAI workbenches
+- **Purpose**: Notebook image for RHOAI workbenches with L40S GPU compatibility
+
+**Why Custom Image?**
+The ImageStream references a custom-built image that fixes two critical issues:
+1. **GPU Architecture Compatibility**: Bypasses the Clara Train GPU whitelist that rejects L40S (Ada Lovelace) GPUs
+2. **CUDA Driver Compatibility**: Removes outdated CUDA compat libraries (driver 470.x) and uses host driver libraries (580.x+)
+
+See the [Containerfile](Containerfile) for implementation details.
 
 ## Troubleshooting
 
@@ -260,12 +300,39 @@ oc describe node <gpu-node-name>
 ```
 
 ### GPU Not Available in Workbench
-**Symptoms**: `torch.cuda.is_available()` returns False
+**Symptoms**: `torch.cuda.is_available()` returns False even though `nvidia-smi` works
 
-**Solution**:
-- Verify GPU was requested in workbench creation (resource limits)
-- Check GPU Operator status: `oc get pods -n nvidia-gpu-operator`
-- Review workbench pod spec: `oc describe pod <workbench-pod>`
+**Common Causes**:
+
+1. **Using Official NVIDIA Image Instead of Custom Image** (Most Common):
+   - **Problem**: The official `nvcr.io/nvidia/clara-train-sdk:v4.1` has two critical issues:
+     - GPU architecture whitelist rejects L40S GPUs (container won't start)
+     - CUDA driver compatibility issues (PyTorch can't detect GPU)
+   - **Solution**: Ensure you selected "Clara Train SDK (v4.1)" from the ImageStream when creating the workbench
+   - **Verify**: Check the workbench pod image:
+     ```bash
+     oc get pod <workbench-pod> -o jsonpath='{.spec.containers[0].image}'
+     ```
+     Should show the custom image from your registry (e.g., `quay.io/hacohen/clara-sdk:v4.1`), not `nvcr.io` directly
+
+2. **GPU Not Requested**:
+   - Verify GPU was requested in workbench creation (resource limits)
+   - Review workbench pod spec: `oc describe pod <workbench-pod>`
+   - Should show `nvidia.com/gpu: 1` in limits and requests
+
+3. **GPU Operator Issues**:
+   - Check GPU Operator status: `oc get pods -n nvidia-gpu-operator`
+   - Verify all pods are Running
+
+**Debug Steps**:
+```bash
+# Inside workbench terminal
+nvidia-smi                    # Should show L40S GPU
+python -c "import torch; print('CUDA available:', torch.cuda.is_available())"  # Should be True
+
+# If nvidia-smi works but PyTorch shows False:
+# You're using the wrong image - recreate workbench with the ImageStream image
+```
 
 ## Next Steps
 
