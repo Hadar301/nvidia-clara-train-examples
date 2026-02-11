@@ -63,8 +63,8 @@ components:
     # If empty, uses release namespace. Set to "redhat-ods-applications" for cluster-wide
     namespace: ""
     image:
-      registry: nvcr.io
-      repository: nvidia/clara-train-sdk
+      registry: quay.io
+      repository: hacohen/clara-sdk
       tag: v4.1
     annotations:
       # RHOAI notebook image annotations for UI display
