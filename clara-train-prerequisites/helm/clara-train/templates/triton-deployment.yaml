@@ -1,0 +1,58 @@
+{{- if .Values.components.triton.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.components.triton.name }}
+  namespace: {{ include "clara-train.namespace" . }}
+  labels:
+    {{- include "clara-train.labels" . | nindent 4 }}
+    app: {{ .Values.components.triton.name }}
+spec:
+  replicas: {{ .Values.components.triton.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.components.triton.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.components.triton.name }}
+        {{- include "clara-train.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.components.triton.tolerations }}
+      tolerations:
+      {{- toYaml .Values.components.triton.tolerations | nindent 6 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.components.secret.name }}
+      containers:
+      - name: triton
+        image: {{ .Values.components.triton.image }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.components.triton.ports.http }}
+          protocol: TCP
+        - name: grpc
+          containerPort: {{ .Values.components.triton.ports.grpc }}
+          protocol: TCP
+        - name: metrics
+          containerPort: {{ .Values.components.triton.ports.metrics }}
+          protocol: TCP
+        resources:
+          limits:
+            "nvidia.com/gpu": {{ index .Values.components.triton.resources.limits "nvidia.com/gpu" }}
+          requests:
+            memory: {{ .Values.components.triton.resources.requests.memory }}
+            cpu: {{ .Values.components.triton.resources.requests.cpu }}
+        livenessProbe:
+          httpGet:
+            path: /v2/health/live
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /v2/health/ready
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+{{- end }}
