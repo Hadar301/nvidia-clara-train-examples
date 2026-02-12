@@ -19,5 +19,6 @@ ENV JUPYTER_RUNTIME_DIR=/tmp/jupyter_runtime \
     JUPYTER_CONFIG_DIR=/tmp/jupyter_config
 
 # Override the entrypoint to skip GPU check and start Jupyter directly
+# Set a default token for IDE/remote connections (can be overridden via NB_TOKEN env var)
 ENTRYPOINT []
-CMD ["/bin/bash", "-c", "exec jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password='' --NotebookApp.allow_origin='*' --NotebookApp.base_url=${NB_PREFIX} --NotebookApp.authenticate_prometheus=False"]
+CMD ["/bin/bash", "-c", "exec jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=${NB_TOKEN:-clara-train-2026} --NotebookApp.password='' --NotebookApp.allow_origin='*' --NotebookApp.base_url=${NB_PREFIX} --NotebookApp.authenticate_prometheus=False"]

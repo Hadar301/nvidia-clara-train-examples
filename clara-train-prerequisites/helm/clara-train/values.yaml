@@ -18,14 +18,6 @@ components:
     name: ngc-secret
     email: "user@example.com"  # Optional, can be any email
 
-  # Persistent Volume Claim for datasets/models
-  storage:
-    enabled: true
-    name: clara-train-storage
-    size: 100Gi
-    storageClassName: gp3-csi
-    accessMode: ReadWriteOnce
-
   # Triton Inference Server for AIAA (AI-Assisted Annotation)
   # Note: Requires model repository configuration. Disabled by default.
   triton:

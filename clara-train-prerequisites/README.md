@@ -6,20 +6,18 @@ This directory contains the installation tooling for NVIDIA Clara Train SDK prer
 
 This Helm chart and Makefile setup automates the deployment of:
 - **NGC Registry Secret**: Authentication for NVIDIA container registry
-- **Storage PVC**: Persistent volume for datasets and models (100GB)
-- **Custom Clara Train Image**: Modified Clara Train SDK v4.1 with L40S GPU compatibility fixes
+- **Custom Clara Train Image**: Modified Clara Train SDK v4.1 with GPU compatibility fixes for newer architectures
 - **ImageStream**: Makes the custom image available for RHOAI workbenches
 
-**Optional Component (not installed by default):**
-- **Triton Inference Server**: For AI-Assisted Annotation (AIAA) functionality - requires model repository configuration
+**Note**: Storage (PVC) is automatically created by RHOAI when you create a workbench - no pre-provisioning needed.
 
 ### Why a Custom Image is Required
 
-The official `nvcr.io/nvidia/clara-train-sdk:v4.1` cannot run on modern GPUs like the L40S due to two critical incompatibilities. Our custom image ([Containerfile](Containerfile)) solves both issues.
+The official `nvcr.io/nvidia/clara-train-sdk:v4.1` cannot run on newer GPU architectures (Ada Lovelace and later, including L40S, L40, H100, etc.) due to two critical incompatibilities. Our custom image ([Containerfile](Containerfile)) solves both issues.
 
 #### Problem 1: GPU Architecture Incompatibility
-- **Issue**: Clara Train SDK v4.1 (October 2021) has a GPU architecture whitelist that only recognizes Ampere GPUs
-- **L40S GPU**: Uses the newer Ada Lovelace architecture (2023)
+- **Issue**: Clara Train SDK v4.1 (October 2021) has a GPU architecture whitelist that only recognizes Ampere GPUs and older
+- **Newer GPUs**: Ada Lovelace (L40S, L40), Hopper (H100), and newer architectures are not recognized
 - **Error**: Container fails to start with `ERROR: No supported GPU(s) detected to run this container`
 - **Fix**: Custom image clears the `ENTRYPOINT` to bypass the GPU validation script
 
@@ -30,13 +28,13 @@ The official `nvcr.io/nvidia/clara-train-sdk:v4.1` cannot run on modern GPUs lik
 - **Fix**: Custom image removes incompatible compat libraries and prioritizes host driver libraries from GPU Operator
 
 #### What the Custom Image Does
-The [Containerfile](Containerfile) applies three critical fixes:
+The [Containerfile](Containerfile) applies critical fixes:
 
-1. **Bypasses GPU architecture check** - Removes the validation script that rejects L40S GPUs
+1. **Bypasses GPU architecture check** - Removes the validation script that rejects newer GPU architectures
 2. **Fixes CUDA driver compatibility** - Removes outdated CUDA compat libraries and configures the container to use host driver libraries (580.x+)
 3. **Configures Jupyter for RHOAI** - Sets proper base URL, writable directories, and authentication for OpenShift AI integration
 
-**Without this custom image**: The Clara Train SDK container would refuse to start on L40S GPUs, and even if forced to start, PyTorch would not be able to detect or use the GPU.
+**Without this custom image**: The Clara Train SDK container would refuse to start on newer GPUs, and even if forced to start, PyTorch would not be able to detect or use the GPU.
 
 ## Quick Start
 
@@ -69,10 +67,7 @@ make install
 
 This will deploy the core components to your namespace:
 - NGC Registry Secret
-- Storage PVC (100GB)
 - Clara Train ImageStream
-
-**Note**: Triton Inference Server is **not** installed by default. See [Installing Triton Server](#installing-triton-server-optional) below if you need AIAA functionality.
 
 ### 4. Verify Installation
 
@@ -91,11 +86,10 @@ Wait for the ImageStream to import (~10-15 minutes for the 15GB image).
    - **GPU**: 1 nvidia.com/gpu
    - **CPU**: 16 cores
    - **Memory**: 64GB
-   - **Storage**: 100GB
-   - **Mount**: clara-train-storage PVC
+   - **Storage**: Create new persistent storage (100GB recommended)
 
 **CRITICAL**: You **must** use the Clara Train SDK image from the ImageStream created by this installation. Do **NOT** use the official `nvcr.io/nvidia/clara-train-sdk:v4.1` image directly, as it:
-- Will fail to start on L40S GPUs (architecture whitelist rejection)
+- Will fail to start on newer GPU architectures (architecture whitelist rejection)
 - Cannot detect GPUs in PyTorch even if it starts (driver compatibility issues)
 
 The ImageStream provides the custom image with all necessary fixes applied.
@@ -115,8 +109,6 @@ bash scripts/test-gpu.sh
 | `make help` | Display available commands and environment status |
 | `make install` | Install all prerequisites |
 | `make install-secret` | Install NGC registry secret only |
-| `make install-storage` | Install storage PVC only |
-| `make install-triton` | Install Triton inference server only |
 | `make install-imagestream` | Install Clara Train ImageStream only |
 | `make verify` | Verify installation status |
 | `make clean` | Remove all installed components |
@@ -128,6 +120,7 @@ clara-train-prerequisites/
 ├── Makefile                           # Installation orchestration
 ├── README.md                          # This file
 ├── prerequisites.md                   # Detailed prerequisites documentation
+├── Containerfile                      # Custom Clara Train image with GPU fixes
 ├── helm/
 │   └── clara-train/
 │       ├── Chart.yaml                 # Helm chart metadata
@@ -136,8 +129,6 @@ clara-train-prerequisites/
 │           ├── _helpers.tpl           # Template helpers
 │           ├── secret.yaml            # NGC registry secret
 │           ├── pvc.yaml               # Storage PVC
-│           ├── triton-deployment.yaml # Triton deployment
-│           ├── triton-service.yaml    # Triton service
 │           └── imagestream.yaml       # Clara Train ImageStream
 └── scripts/
     ├── verify-installation.sh         # Post-install verification
@@ -145,45 +136,6 @@ clara-train-prerequisites/
 ```
 
 ## Customization
-
-### Custom Storage Size
-
-```bash
-make install --set components.storage.size=200Gi
-```
-
-### Custom Storage Class
-
-```bash
-make install --set components.storage.storageClassName=my-storage-class
-```
-
-### Installing Triton Server (Optional)
-
-Triton Inference Server is **not installed by default** because it requires:
-1. A model repository to be configured (will crash without models)
-2. Additional GPU resources (1 GPU dedicated to Triton)
-3. AIAA-specific setup and configuration
-
-**When do you need Triton?**
-- Only if you plan to use AI-Assisted Annotation (AIAA) features
-- AIAA enables interactive segmentation and annotation tools in medical imaging workflows
-- Most Clara Train workflows (training, AutoML, federated learning) do **not** require Triton
-
-**To install Triton:**
-
-```bash
-# Install Triton after setting up your AIAA models
-make install-triton
-```
-
-**Important**: Before installing Triton, you must:
-1. Create your RHOAI workbench with Clara Train SDK
-2. Follow the AIAA setup instructions in `PyTorch/NoteBooks/AIAA/AIAA.ipynb`
-3. Configure your model repository
-4. Then install Triton using `make install-triton`
-
-Otherwise, the Triton pod will crash with "no model repository" errors.
 
 ### Deploy ImageStream Cluster-Wide
 
@@ -198,35 +150,17 @@ make install --set components.imagestream.namespace=redhat-ods-applications
 - **Type**: `kubernetes.io/dockerconfigjson`
 - **Purpose**: Authenticate to NVIDIA Container Registry (nvcr.io)
 
-### Storage PVC
-- **Name**: `clara-train-storage`
-- **Size**: 100Gi (configurable)
-- **Access Mode**: ReadWriteOnce
-- **Storage Class**: gp3-csi (configurable)
-
-### Triton Inference Server (Optional - Not Installed by Default)
-- **Name**: `triton-server`
-- **Image**: `nvcr.io/nvidia/tritonserver:24.01-py3`
-- **GPU**: 1 required
-- **Ports**: 8000 (HTTP), 8001 (gRPC), 8002 (metrics)
-- **Purpose**: AI-Assisted Annotation (AIAA) functionality
-- **Installation**: Use `make install-triton` after configuring model repository
-- **Requirements**:
-  - Model repository must be configured first
-  - GPU node with taints must be tolerated (configured in values.yaml)
-  - Additional GPU resources available in cluster
-
 ### ImageStream
 - **Name**: `clara-train-workbench`
 - **Base Image**: `nvcr.io/nvidia/clara-train-sdk:v4.1` (modified via Containerfile)
 - **Custom Image**: `quay.io/hacohen/clara-sdk:v4.1` (default in values.yaml)
 - **Size**: ~16GB
 - **Import Time**: 10-15 minutes
-- **Purpose**: Notebook image for RHOAI workbenches with L40S GPU compatibility
+- **Purpose**: Notebook image for RHOAI workbenches with GPU compatibility for newer architectures
 
 **Why Custom Image?**
 The ImageStream references a custom-built image that fixes two critical issues:
-1. **GPU Architecture Compatibility**: Bypasses the Clara Train GPU whitelist that rejects L40S (Ada Lovelace) GPUs
+1. **GPU Architecture Compatibility**: Bypasses the Clara Train GPU whitelist that rejects newer GPU architectures (Ada Lovelace, Hopper, and newer)
 2. **CUDA Driver Compatibility**: Removes outdated CUDA compat libraries (driver 470.x) and uses host driver libraries (580.x+)
 
 See the [Containerfile](Containerfile) for implementation details.
@@ -248,57 +182,6 @@ oc get secret ngc-secret -n <namespace>
 curl -I https://nvcr.io
 ```
 
-### PVC Pending
-**Symptoms**: PVC created but status is Pending
-
-**This is NORMAL**: Many storage classes (including gp3-csi) use `WaitForFirstConsumer` binding mode, which means the PVC won't bind until a pod actually uses it. The PVC will automatically bind when you create your workbench.
-
-**To verify this is expected**:
-```bash
-# Check storage class binding mode
-oc get sc gp3-csi -o jsonpath='{.volumeBindingMode}'
-# Should output: WaitForFirstConsumer
-
-# Check PVC status - "Pending" is normal
-oc get pvc clara-train-storage -n <namespace>
-```
-
-**If PVC fails to bind when workbench is created**:
-```bash
-# Describe PVC for error events
-oc describe pvc clara-train-storage -n <namespace>
-
-# Check storage class exists
-oc get sc
-
-# Verify cluster has storage capacity
-oc get pvc -A
-```
-
-### Triton Pod CrashLoop
-**Symptoms**: Triton pod continuously restarting with "no model repository" errors
-
-**Cause**: Triton requires a model repository to start. This is expected if you haven't configured AIAA models yet.
-
-**Solution**:
-1. **If you don't need AIAA**: Don't install Triton (it's optional)
-2. **If you need AIAA**:
-   - First, create your workbench and follow AIAA setup in notebooks
-   - Configure your model repository
-   - Then install Triton using `make install-triton`
-
-**Debug commands** (if needed):
-```bash
-# Check pod logs
-oc logs deployment/triton-server -n <namespace>
-
-# Verify GPU availability
-oc get nodes -l nvidia.com/gpu.present=true
-
-# Check GPU node taints/tolerations
-oc describe node <gpu-node-name>
-```
-
 ### GPU Not Available in Workbench
 **Symptoms**: `torch.cuda.is_available()` returns False even though `nvidia-smi` works
 
@@ -306,7 +189,7 @@ oc describe node <gpu-node-name>
 
 1. **Using Official NVIDIA Image Instead of Custom Image** (Most Common):
    - **Problem**: The official `nvcr.io/nvidia/clara-train-sdk:v4.1` has two critical issues:
-     - GPU architecture whitelist rejects L40S GPUs (container won't start)
+     - GPU architecture whitelist rejects newer GPUs (container won't start)
      - CUDA driver compatibility issues (PyTorch can't detect GPU)
    - **Solution**: Ensure you selected "Clara Train SDK (v4.1)" from the ImageStream when creating the workbench
    - **Verify**: Check the workbench pod image:
@@ -327,7 +210,7 @@ oc describe node <gpu-node-name>
 **Debug Steps**:
 ```bash
 # Inside workbench terminal
-nvidia-smi                    # Should show L40S GPU
+nvidia-smi                    # Should show your GPU
 python -c "import torch; print('CUDA available:', torch.cuda.is_available())"  # Should be True
 
 # If nvidia-smi works but PyTorch shows False:
@@ -336,24 +219,13 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available())"  #
 
 ## Next Steps
 
-After successful installation:
+After successful installation, follow the [Getting Started Guide](../getting_started.md) to:
 
-1. **Explore Examples**: Clone the official Clara Train examples
-   ```bash
-   git clone https://github.com/NVIDIA/clara-train-examples
-   ```
+1. Create your RHOAI workbench with the Clara Train SDK image
+2. Clone the Clara Train examples repository
+3. Run your first medical imaging AI training workflow
 
-2. **Start with Notebooks**:
-   - `PyTorch/NoteBooks/Welcome.ipynb` - Overview
-   - `PyTorch/NoteBooks/GettingStarted/GettingStarted.ipynb` - Basic workflow
-   - `PyTorch/NoteBooks/Data/DownloadDecathlonDataSet.ipynb` - Sample datasets
-
-3. **Try AIAA** (Optional - requires Triton): Interactive annotation with AI assistance
-   - Follow setup in `PyTorch/NoteBooks/AIAA/AIAA.ipynb`
-   - Then install Triton: `make install-triton`
-
-4. **AutoML**: Automated hyperparameter optimization
-   - `PyTorch/NoteBooks/AutoML/AutoML.ipynb`
+The getting started guide provides step-by-step instructions for running the GettingStarted notebook with GPU acceleration.
 
 ## Support
 
