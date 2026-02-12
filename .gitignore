@@ -2,3 +2,4 @@
 .env
 
 clara-train-examples/
+.DS_Store
